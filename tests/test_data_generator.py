@@ -42,12 +42,12 @@ def test_jobs_definitions():
 
 def test_lineage_edges():
     assert len(LINEAGE_EDGES_DATA) >= 20
-    node_types = {e[1] for e in LINEAGE_EDGES_DATA} | {e[4] for e in LINEAGE_EDGES_DATA}
-    assert "FEED" in node_types
-    assert "JOB" in node_types
-    assert "TABLE" in node_types
-    assert "MART" in node_types
-    assert "DASHBOARD" in node_types
+    node_types = {e[1].lower() for e in LINEAGE_EDGES_DATA} | {e[4].lower() for e in LINEAGE_EDGES_DATA}
+    assert "source" in node_types
+    assert "job" in node_types
+    assert "table" in node_types
+    assert "mart" in node_types
+    assert "dashboard" in node_types
 
 
 def test_workload_cost_calculation():

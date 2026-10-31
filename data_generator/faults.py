@@ -219,7 +219,15 @@ def fault_reset(conn) -> Dict[str, Any]:
     # 1. Reload production tables and reset config
     reloaded_counts = setup_opslens_schema(force_reload=True)
 
-    # 2. Mark active faults as CLEARED in FAULT_LOG
+    # 2. Restore PIPELINE_RUN_LOG (remove failed runs, restore warning/delays)
+    conn.execute("DELETE FROM OPSLENS.PIPELINE_RUN_LOG WHERE RUN_ID LIKE 'run_err_%' OR STATUS = 'FAILED'")
+    conn.execute("""
+        UPDATE OPSLENS.PIPELINE_RUN_LOG 
+        SET STATUS = 'SUCCESS', ERROR_MESSAGE = NULL, DURATION_SEC = 120.00
+        WHERE JOB_ID = 'load_orders' AND STATUS = 'WARNING'
+    """)
+
+    # 3. Mark active faults as CLEARED in FAULT_LOG
     conn.execute("""
         UPDATE OPSLENS.FAULT_LOG
         SET STATUS = 'CLEARED', CLEARED_AT = CURRENT_TIMESTAMP

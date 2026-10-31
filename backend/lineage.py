@@ -79,7 +79,7 @@ def get_lineage_graph(conn=None) -> Dict[str, Any]:
             nodes_dict[src_id] = {
                 "id": src_id,
                 "label": src_lbl,
-                "type": src_type,
+                "type": src_type.lower(),
                 "trust_score": trust_info["trust_score"],
                 "status": node_status,
                 "active_alerts": alerts_map.get(src_clean, []),
@@ -95,7 +95,7 @@ def get_lineage_graph(conn=None) -> Dict[str, Any]:
             nodes_dict[tgt_id] = {
                 "id": tgt_id,
                 "label": tgt_lbl,
-                "type": tgt_type,
+                "type": tgt_type.lower(),
                 "trust_score": trust_info["trust_score"],
                 "status": node_status,
                 "active_alerts": alerts_map.get(tgt_clean, []),
@@ -178,10 +178,11 @@ def get_blast_radius(node_id: str, conn=None) -> Dict[str, Any]:
                 visited_down.add(child)
                 queue.append(child)
                 child_meta = node_meta.get(child, {"id": child, "type": "UNKNOWN", "label": child})
+                child_meta["type"] = child_meta["type"].lower()
                 affected_nodes.append(child_meta)
-                if child_meta["type"] == "DASHBOARD":
+                if child_meta["type"] == "dashboard":
                     affected_dashboards.append(child_meta["label"])
-                elif child_meta["type"] == "MART":
+                elif child_meta["type"] == "mart":
                     affected_marts.append(child_meta["label"])
 
     # BFS Upstream (Root Causes)

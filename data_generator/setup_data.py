@@ -81,7 +81,18 @@ def execute_sql_file(conn, file_path: str):
 def initialize_config_table(conn, force: bool = False):
     """Initializes or resets OPSLENS.CONFIG with reference clock and thresholds."""
     if force:
-        conn.execute("TRUNCATE TABLE OPSLENS.CONFIG")
+        conn.execute("""
+            UPDATE OPSLENS.CONFIG 
+            SET PARAM_VALUE = CASE PARAM_KEY 
+                WHEN 'reference_now' THEN '2025-04-01 00:00:00'
+                WHEN 'expected_latest_energy' THEN '2025-03-31 23:00:00'
+                WHEN 'expected_latest_weather' THEN '2025-12-31 00:00:00'
+                ELSE PARAM_VALUE 
+            END,
+            UPDATED_AT = CURRENT_TIMESTAMP
+        """)
+        return
+
     for key, val, desc in DEFAULT_CONFIG:
         # Check if key exists
         res = conn.execute(f"SELECT COUNT(*) FROM OPSLENS.CONFIG WHERE PARAM_KEY = '{key}'").fetchall()
@@ -89,10 +100,6 @@ def initialize_config_table(conn, force: bool = False):
             conn.execute(
                 f"INSERT INTO OPSLENS.CONFIG (PARAM_KEY, PARAM_VALUE, DESCRIPTION, UPDATED_AT) "
                 f"VALUES ('{key}', '{val}', '{desc}', CURRENT_TIMESTAMP)"
-            )
-        elif force:
-            conn.execute(
-                f"UPDATE OPSLENS.CONFIG SET PARAM_VALUE = '{val}', UPDATED_AT = CURRENT_TIMESTAMP WHERE PARAM_KEY = '{key}'"
             )
 
 
@@ -115,10 +122,11 @@ def setup_opslens_schema(force_reload: bool = False) -> Dict[str, int]:
         conn.execute("CREATE SCHEMA IF NOT EXISTS OPSLENS")
         conn.execute("OPEN SCHEMA OPSLENS")
 
-        # 2. Apply metadata tables DDL
-        print("[2/5] Applying metadata tables DDL...")
-        sql_path = os.path.join("sql", "02_create_metadata_tables.sql")
-        execute_sql_file(conn, sql_path)
+        # 2. Apply metadata tables DDL (only on initial setup or if missing)
+        if not force_reload:
+            print("[2/5] Applying metadata tables DDL...")
+            sql_path = os.path.join("sql", "02_create_metadata_tables.sql")
+            execute_sql_file(conn, sql_path)
 
         # 3. Configure Reference Clock and Operational Config
         print("[3/5] Setting up OPSLENS.CONFIG reference clock...")
@@ -129,6 +137,10 @@ def setup_opslens_schema(force_reload: bool = False) -> Dict[str, int]:
         for item in COPIES:
             target = item["target"]
             source = item["source"]
+
+            # Customer and energy meters never mutate during faults
+            if force_reload and target in ("OPSLENS.CUSTOMER", "OPSLENS.ENERGY_METERS"):
+                continue
 
             table_exists = False
             curr_count = 0

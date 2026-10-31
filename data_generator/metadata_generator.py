@@ -86,41 +86,35 @@ JOBS_DEF = [
 ]
 
 LINEAGE_EDGES_DATA = [
-    # Ingestion Feeds -> Jobs
-    ("feed_tpch", "FEED", "TPC-H Ingestion Feed", "job_load_orders", "JOB", "load_orders", "READS_FROM"),
-    ("feed_tpch", "FEED", "TPC-H Ingestion Feed", "job_load_lineitem", "JOB", "load_lineitem", "READS_FROM"),
-    ("feed_energy", "FEED", "Smart Meter IoT Stream", "job_load_energy", "JOB", "load_energy", "READS_FROM"),
-    ("feed_weather", "FEED", "NOAA Weather API", "job_load_weather", "JOB", "load_weather", "READS_FROM"),
+    # Branch 1: TPCH Ingestion -> Orders & Lineitem -> Revenue Mart -> Revenue Dashboard
+    ("feed_tpch", "source", "TPC-H Ingestion Feed", "job_load_orders", "job", "load_orders", "READS_FROM"),
+    ("feed_tpch", "source", "TPC-H Ingestion Feed", "job_load_lineitem", "job", "load_lineitem", "READS_FROM"),
+    ("job_load_orders", "job", "load_orders", "tbl_orders", "table", "ORDERS", "WRITES_TO"),
+    ("job_load_orders", "job", "load_orders", "tbl_customer", "table", "CUSTOMER", "WRITES_TO"),
+    ("job_load_lineitem", "job", "load_lineitem", "tbl_lineitem", "table", "LINEITEM", "WRITES_TO"),
+    ("tbl_orders", "table", "ORDERS", "job_build_revenue_mart", "job", "build_revenue_mart", "READS_FROM"),
+    ("tbl_lineitem", "table", "LINEITEM", "job_build_revenue_mart", "job", "build_revenue_mart", "READS_FROM"),
+    ("tbl_customer", "table", "CUSTOMER", "job_build_revenue_mart", "job", "build_revenue_mart", "READS_FROM"),
+    ("job_build_revenue_mart", "job", "build_revenue_mart", "mart_revenue", "mart", "REVENUE_MART", "BUILDS"),
+    ("mart_revenue", "mart", "REVENUE_MART", "dash_revenue", "dashboard", "Revenue Dashboard", "SERVES"),
 
-    # Jobs -> Tables
-    ("job_load_orders", "JOB", "load_orders", "tbl_orders", "TABLE", "OPSLENS.ORDERS", "WRITES_TO"),
-    ("job_load_orders", "JOB", "load_orders", "tbl_customer", "TABLE", "OPSLENS.CUSTOMER", "WRITES_TO"),
-    ("job_load_lineitem", "JOB", "load_lineitem", "tbl_lineitem", "TABLE", "OPSLENS.LINEITEM", "WRITES_TO"),
-    ("job_load_energy", "JOB", "load_energy", "tbl_energy_readings", "TABLE", "OPSLENS.ENERGY_READINGS", "WRITES_TO"),
-    ("job_load_energy", "JOB", "load_energy", "tbl_energy_meters", "TABLE", "OPSLENS.ENERGY_METERS", "WRITES_TO"),
-    ("job_load_weather", "JOB", "load_weather", "tbl_weather_daily", "TABLE", "OPSLENS.WEATHER_DAILY", "WRITES_TO"),
+    # Branch 2: Energy Stream -> Load Energy -> Energy Tables -> Grid Mart
+    ("feed_energy", "source", "Smart Meter IoT Stream", "job_load_energy", "job", "load_energy", "READS_FROM"),
+    ("job_load_energy", "job", "load_energy", "tbl_energy_readings", "table", "ENERGY_READINGS", "WRITES_TO"),
+    ("job_load_energy", "job", "load_energy", "tbl_energy_meters", "table", "ENERGY_METERS", "WRITES_TO"),
+    ("tbl_energy_readings", "table", "ENERGY_READINGS", "mart_grid_ops", "mart", "GRID_OPS_MART", "FEEDS"),
+    ("tbl_energy_meters", "table", "ENERGY_METERS", "mart_grid_ops", "mart", "GRID_OPS_MART", "FEEDS"),
 
-    # Tables -> Mart Transformation Job
-    ("tbl_orders", "TABLE", "OPSLENS.ORDERS", "job_build_revenue_mart", "JOB", "build_revenue_mart", "READS_FROM"),
-    ("tbl_lineitem", "TABLE", "OPSLENS.LINEITEM", "job_build_revenue_mart", "JOB", "build_revenue_mart", "READS_FROM"),
-    ("tbl_customer", "TABLE", "OPSLENS.CUSTOMER", "job_build_revenue_mart", "JOB", "build_revenue_mart", "READS_FROM"),
-    ("tbl_energy_readings", "TABLE", "OPSLENS.ENERGY_READINGS", "job_build_revenue_mart", "JOB", "build_revenue_mart", "READS_FROM"),
-    ("tbl_weather_daily", "TABLE", "OPSLENS.WEATHER_DAILY", "job_build_revenue_mart", "JOB", "build_revenue_mart", "READS_FROM"),
+    # Branch 3: Weather Feed -> Load Weather -> Weather Table -> Grid Mart -> Smart Grid Dashboard
+    ("feed_weather", "source", "NOAA Weather API", "job_load_weather", "job", "load_weather", "READS_FROM"),
+    ("job_load_weather", "job", "load_weather", "tbl_weather_daily", "table", "WEATHER_DAILY", "WRITES_TO"),
+    ("tbl_weather_daily", "table", "WEATHER_DAILY", "mart_grid_ops", "mart", "GRID_OPS_MART", "FEEDS"),
+    ("mart_grid_ops", "mart", "GRID_OPS_MART", "dash_grid", "dashboard", "Smart Grid Dashboard", "SERVES"),
 
-    # Mart Job -> Analytical Marts
-    ("job_build_revenue_mart", "JOB", "build_revenue_mart", "mart_revenue", "MART", "OPSLENS.REVENUE_MART", "BUILDS"),
-    ("job_build_revenue_mart", "JOB", "build_revenue_mart", "mart_grid_ops", "MART", "OPSLENS.GRID_OPS_MART", "BUILDS"),
-
-    # Marts & Tables -> Publish Dashboards Job
-    ("mart_revenue", "MART", "OPSLENS.REVENUE_MART", "job_publish_dashboards", "JOB", "publish_dashboards", "READS_FROM"),
-    ("mart_grid_ops", "MART", "OPSLENS.GRID_OPS_MART", "job_publish_dashboards", "JOB", "publish_dashboards", "READS_FROM"),
-    ("tbl_orders", "TABLE", "OPSLENS.ORDERS", "job_publish_dashboards", "JOB", "publish_dashboards", "READS_FROM"),
-    ("tbl_energy_readings", "TABLE", "OPSLENS.ENERGY_READINGS", "job_publish_dashboards", "JOB", "publish_dashboards", "READS_FROM"),
-
-    # Publish Job -> End Dashboards
-    ("job_publish_dashboards", "JOB", "publish_dashboards", "dash_revenue", "DASHBOARD", "Revenue Analytics Dashboard", "SERVES"),
-    ("job_publish_dashboards", "JOB", "publish_dashboards", "dash_energy", "DASHBOARD", "Smart Grid Energy Dashboard", "SERVES"),
-    ("job_publish_dashboards", "JOB", "publish_dashboards", "dash_ops", "DASHBOARD", "OpsLens Workload & Health Dashboard", "SERVES"),
+    # Executive Ops Dashboard depends on BOTH Marts
+    ("mart_revenue", "mart", "REVENUE_MART", "job_publish_dashboards", "job", "publish_dashboards", "READS_FROM"),
+    ("mart_grid_ops", "mart", "GRID_OPS_MART", "job_publish_dashboards", "job", "publish_dashboards", "READS_FROM"),
+    ("job_publish_dashboards", "job", "publish_dashboards", "dash_ops", "dashboard", "Executive Ops Dashboard", "SERVES"),
 ]
 
 

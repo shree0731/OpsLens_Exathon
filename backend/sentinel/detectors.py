@@ -77,13 +77,23 @@ def check_late_or_failed_jobs(conn) -> List[Dict[str, Any]]:
                 "run_id": run_id
             })
 
+    JOB_TARGET_MAP = {
+        "load_orders": "ORDERS",
+        "load_lineitem": "LINEITEM",
+        "load_energy": "ENERGY_READINGS",
+        "load_weather": "WEATHER_DAILY",
+        "build_revenue_mart": "REVENUE_MART",
+        "publish_dashboards": "Executive Ops Dashboard",
+    }
+
     # Record check results
     if job_failures:
         for f in job_failures:
+            target_obj = JOB_TARGET_MAP.get(f['job_id'], f['job_id'])
             results.append({
                 "check_id": f"chk_{uuid.uuid4().hex[:12]}",
                 "check_name": f"Pipeline Failure: {f['job_id']}:{f['stage']}",
-                "table_name": f"PIPELINE_JOB:{f['job_id']}",
+                "table_name": target_obj,
                 "check_type": "JOB_HEALTH",
                 "severity": "CRITICAL",
                 "status": "FAIL",
@@ -112,10 +122,11 @@ def check_late_or_failed_jobs(conn) -> List[Dict[str, Any]]:
 
     if late_jobs:
         for l in late_jobs:
+            target_obj = JOB_TARGET_MAP.get(l['job_id'], l['job_id'])
             results.append({
                 "check_id": f"chk_{uuid.uuid4().hex[:12]}",
                 "check_name": f"Late Load SLA Breach: {l['job_id']}:{l['stage']}",
-                "table_name": f"PIPELINE_JOB:{l['job_id']}",
+                "table_name": target_obj,
                 "check_type": "JOB_HEALTH",
                 "severity": "WARNING",
                 "status": "FAIL",

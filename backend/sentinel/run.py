@@ -85,19 +85,22 @@ def execute_sentinel(conn=None) -> Dict[str, Any]:
         
         # 2. Persist to CHECK_RESULTS (truncate existing or overwrite)
         conn.execute("TRUNCATE TABLE OPSLENS.CHECK_RESULTS")
-        for chk in check_results:
-            msg = chk["message"].replace("'", "''")[:950]
-            exp_val = str(chk.get("expected_value", "")).replace("'", "''")[:250]
-            act_val = str(chk.get("actual_value", "")).replace("'", "''")[:250]
-            chk_name = chk["check_name"].replace("'", "''")[:120]
-            tbl_name = chk["table_name"][:60]
-            
+        if check_results:
+            val_clauses = []
+            for chk in check_results:
+                msg = chk["message"].replace("'", "''")[:950]
+                exp_val = str(chk.get("expected_value", "")).replace("'", "''")[:250]
+                act_val = str(chk.get("actual_value", "")).replace("'", "''")[:250]
+                chk_name = chk["check_name"].replace("'", "''")[:120]
+                tbl_name = chk["table_name"][:60]
+                val_clauses.append(
+                    f"('{chk['check_id']}', '{chk_name}', '{tbl_name}', '{chk['check_type']}', "
+                    f"'{chk['severity']}', '{chk['status']}', '{exp_val}', '{act_val}', '{msg}', CURRENT_TIMESTAMP, TRUE)"
+                )
             insert_chk_sql = f"""
-            INSERT INTO OPSLENS.CHECK_RESULTS 
-            (CHECK_ID, CHECK_NAME, TABLE_NAME, CHECK_TYPE, SEVERITY, STATUS, EXPECTED_VALUE, ACTUAL_VALUE, MESSAGE, EXECUTED_AT, IS_SIMULATED)
-            VALUES 
-            ('{chk["check_id"]}', '{chk_name}', '{tbl_name}', '{chk["check_type"]}', 
-             '{chk["severity"]}', '{chk["status"]}', '{exp_val}', '{act_val}', '{msg}', CURRENT_TIMESTAMP, TRUE)
+                INSERT INTO OPSLENS.CHECK_RESULTS 
+                (CHECK_ID, CHECK_NAME, TABLE_NAME, CHECK_TYPE, SEVERITY, STATUS, EXPECTED_VALUE, ACTUAL_VALUE, MESSAGE, EXECUTED_AT, IS_SIMULATED)
+                VALUES {', '.join(val_clauses)}
             """
             conn.execute(insert_chk_sql)
 

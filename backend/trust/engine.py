@@ -213,12 +213,12 @@ def compute_consistency_scores(conn) -> Dict[str, float]:
     for d in drift_alerts:
         tbl = d[0].replace("OPSLENS.", "").strip()
         if tbl in consistency:
-            consistency[tbl] = max(0.0, consistency[tbl] - 35.0)
+            consistency[tbl] = min(consistency[tbl], 40.0)
 
     # Also check directly if unexpected columns exist on ORDERS
     cols = [r[0] for r in conn.execute("SELECT COLUMN_NAME FROM SYS.EXA_ALL_COLUMNS WHERE COLUMN_SCHEMA='OPSLENS' AND COLUMN_TABLE='ORDERS'").fetchall()]
     if "UNEXPECTED_TAX_SURCHARGE" in cols:
-        consistency["ORDERS"] = max(0.0, consistency["ORDERS"] - 35.0)
+        consistency["ORDERS"] = min(consistency["ORDERS"], 40.0)
 
     # 3. Job failure penalty (if build_revenue_mart failed)
     fail_chk = conn.execute("""
@@ -269,7 +269,7 @@ def calculate_all_trust_scores(conn=None) -> List[Dict[str, Any]]:
             
             scores_list.append({
                 "OBJECT_NAME": tbl,
-                "OBJECT_TYPE": "TABLE",
+                "OBJECT_TYPE": "table",
                 "TRUST_SCORE": total,
                 "FRESHNESS_SCORE": f,
                 "COMPLETENESS_SCORE": c,
@@ -291,7 +291,7 @@ def calculate_all_trust_scores(conn=None) -> List[Dict[str, Any]]:
 
         scores_list.append({
             "OBJECT_NAME": "REVENUE_MART",
-            "OBJECT_TYPE": "MART",
+            "OBJECT_TYPE": "mart",
             "TRUST_SCORE": rev_total,
             "FRESHNESS_SCORE": rev_f,
             "COMPLETENESS_SCORE": rev_c,
@@ -310,7 +310,7 @@ def calculate_all_trust_scores(conn=None) -> List[Dict[str, Any]]:
 
         scores_list.append({
             "OBJECT_NAME": "GRID_OPS_MART",
-            "OBJECT_TYPE": "MART",
+            "OBJECT_TYPE": "mart",
             "TRUST_SCORE": grid_total,
             "FRESHNESS_SCORE": grid_f,
             "COMPLETENESS_SCORE": grid_c,
@@ -324,7 +324,7 @@ def calculate_all_trust_scores(conn=None) -> List[Dict[str, Any]]:
         # 3. Dashboards (Inherits minimum trust of underlying marts)
         dashboards = [
             ("Revenue Dashboard", ["REVENUE_MART"]),
-            ("Grid Ops Dashboard", ["GRID_OPS_MART"]),
+            ("Smart Grid Dashboard", ["GRID_OPS_MART"]),
             ("Executive Ops Dashboard", ["REVENUE_MART", "GRID_OPS_MART"]),
         ]
 
@@ -338,7 +338,7 @@ def calculate_all_trust_scores(conn=None) -> List[Dict[str, Any]]:
 
             scores_list.append({
                 "OBJECT_NAME": dash_name,
-                "OBJECT_TYPE": "DASHBOARD",
+                "OBJECT_TYPE": "dashboard",
                 "TRUST_SCORE": dash_total,
                 "FRESHNESS_SCORE": dash_f,
                 "COMPLETENESS_SCORE": dash_c,
@@ -349,16 +349,20 @@ def calculate_all_trust_scores(conn=None) -> List[Dict[str, Any]]:
 
         # 4. Persist to OPSLENS.TRUST_SCORES
         conn.execute("TRUNCATE TABLE OPSLENS.TRUST_SCORES")
-        for sc in scores_list:
-            sc_id = f"trs_{uuid.uuid4().hex[:12]}"
+        if scores_list:
+            sc_clauses = []
+            for sc in scores_list:
+                sc_id = f"trs_{uuid.uuid4().hex[:12]}"
+                sc_clauses.append(
+                    f"('{sc_id}', '{sc['OBJECT_NAME']}', '{sc['OBJECT_TYPE']}', "
+                    f"{sc['TRUST_SCORE']}, {sc['FRESHNESS_SCORE']}, {sc['COMPLETENESS_SCORE']}, "
+                    f"{sc['UNIQUENESS_SCORE']}, {sc['CONSISTENCY_SCORE']}, '{sc['STATUS']}', CURRENT_TIMESTAMP, TRUE)"
+                )
             conn.execute(f"""
                 INSERT INTO OPSLENS.TRUST_SCORES 
                 (SCORE_ID, OBJECT_NAME, OBJECT_TYPE, TRUST_SCORE, FRESHNESS_SCORE, 
                  COMPLETENESS_SCORE, UNIQUENESS_SCORE, CONSISTENCY_SCORE, STATUS, COMPUTED_AT, IS_SIMULATED)
-                VALUES 
-                ('{sc_id}', '{sc["OBJECT_NAME"]}', '{sc["OBJECT_TYPE"]}', 
-                 {sc["TRUST_SCORE"]}, {sc["FRESHNESS_SCORE"]}, {sc["COMPLETENESS_SCORE"]}, 
-                 {sc["UNIQUENESS_SCORE"]}, {sc["CONSISTENCY_SCORE"]}, '{sc["STATUS"]}', CURRENT_TIMESTAMP, TRUE)
+                VALUES {', '.join(sc_clauses)}
             """)
 
         return scores_list

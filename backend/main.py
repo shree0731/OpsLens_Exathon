@@ -395,15 +395,69 @@ def run_checks_now():
 @app.post("/api/faults/reset", tags=["Fault Simulator"])
 def trigger_fault_reset():
     """Reloads production tables from source schemas, clears faults, and restores healthy state."""
-    res = run_fault("reset")
-    sentinel_res = execute_sentinel()
-    trust_scores = calculate_all_trust_scores()
-    return {
-        "status": "CLEARED",
-        "fault_result": res,
-        "sentinel_result": sentinel_res,
-        "trust_scores": trust_scores,
-    }
+    conn = get_connection(schema="OPSLENS")
+    try:
+        res = FAULTS_MAP["reset"](conn)
+        sentinel_res = execute_sentinel(conn)
+        trust_scores = calculate_all_trust_scores(conn)
+        return {
+            "status": "CLEARED",
+            "fault_result": res,
+            "sentinel_result": sentinel_res,
+            "trust_scores": trust_scores,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/faults/status", tags=["Fault Simulator"])
+def get_fault_status():
+    """Returns active and recent fault injections from OPSLENS.FAULT_LOG."""
+    conn = get_connection(schema="OPSLENS")
+    try:
+        active_rows = conn.execute("""
+            SELECT FAULT_ID, FAULT_NAME, TARGET_TABLE, DETAILS, STATUS, CAST(INJECTED_AT AS VARCHAR(32))
+            FROM OPSLENS.FAULT_LOG
+            WHERE STATUS = 'ACTIVE'
+            ORDER BY INJECTED_AT DESC
+        """).fetchall()
+        
+        history_rows = conn.execute("""
+            SELECT FAULT_ID, FAULT_NAME, TARGET_TABLE, DETAILS, STATUS, 
+                   CAST(INJECTED_AT AS VARCHAR(32)), CAST(CLEARED_AT AS VARCHAR(32))
+            FROM OPSLENS.FAULT_LOG
+            ORDER BY INJECTED_AT DESC
+            LIMIT 20
+        """).fetchall()
+
+        return {
+            "active_faults_count": len(active_rows),
+            "active_faults": [
+                {
+                    "fault_id": r[0],
+                    "fault_name": r[1],
+                    "target_table": r[2],
+                    "details": r[3],
+                    "status": r[4],
+                    "injected_at": str(r[5]),
+                }
+                for r in active_rows
+            ],
+            "recent_history": [
+                {
+                    "fault_id": r[0],
+                    "fault_name": r[1],
+                    "target_table": r[2],
+                    "details": r[3],
+                    "status": r[4],
+                    "injected_at": str(r[5]),
+                    "cleared_at": str(r[6]) if r[6] else None,
+                }
+                for r in history_rows
+            ],
+        }
+    finally:
+        conn.close()
 
 
 @app.post("/api/faults/{name}", response_model=FaultResponse, tags=["Fault Simulator"])
@@ -419,28 +473,32 @@ def trigger_fault(name: str = Path(..., description="Fault name: late_load, row_
             detail=f"Invalid fault '{fault_name}'. Supported faults: {list(FAULTS_MAP.keys())}"
         )
 
-    # 1. Inject fault
-    fault_res = run_fault(fault_name)
-
-    # 2. Run Sentinel & Trust Score Engine
-    sentinel_res = execute_sentinel()
-    trust_scores = calculate_all_trust_scores()
-
-    # 3. Compute blast radius if target exists
-    target = fault_res.get("target") or "OPSLENS.ORDERS"
-    blast = None
+    conn = get_connection(schema="OPSLENS")
     try:
-        blast = get_blast_radius(target)
-    except Exception:
-        pass
+        # 1. Inject fault reusing connection
+        fault_res = FAULTS_MAP[fault_name](conn)
 
-    return FaultResponse(
-        fault_name=fault_name,
-        fault_result=fault_res,
-        sentinel_result=sentinel_res,
-        trust_scores=trust_scores,
-        blast_radius=blast,
-    )
+        # 2. Run Sentinel & Trust Score Engine reusing connection
+        sentinel_res = execute_sentinel(conn)
+        trust_scores = calculate_all_trust_scores(conn)
+
+        # 3. Compute blast radius reusing connection
+        target = fault_res.get("target") or "ORDERS"
+        blast = None
+        try:
+            blast = get_blast_radius(target, conn)
+        except Exception:
+            pass
+
+        return FaultResponse(
+            fault_name=fault_name,
+            fault_result=fault_res,
+            sentinel_result=sentinel_res,
+            trust_scores=trust_scores,
+            blast_radius=blast,
+        )
+    finally:
+        conn.close()
 
 
 @app.get("/api/cost-radar", tags=["Cost Radar"])

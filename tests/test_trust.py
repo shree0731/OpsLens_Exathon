@@ -58,9 +58,9 @@ def test_dashboard_inheritance():
         assert "REVENUE_MART" in scores_by_name
         assert scores_by_name["Revenue Dashboard"]["TRUST_SCORE"] <= scores_by_name["REVENUE_MART"]["TRUST_SCORE"]
 
-        # Grid Ops Dashboard should inherit from GRID_OPS_MART
-        assert "Grid Ops Dashboard" in scores_by_name
+        # Smart Grid Dashboard should inherit from GRID_OPS_MART
+        assert "Smart Grid Dashboard" in scores_by_name
         assert "GRID_OPS_MART" in scores_by_name
-        assert scores_by_name["Grid Ops Dashboard"]["TRUST_SCORE"] <= scores_by_name["GRID_OPS_MART"]["TRUST_SCORE"]
+        assert scores_by_name["Smart Grid Dashboard"]["TRUST_SCORE"] <= scores_by_name["GRID_OPS_MART"]["TRUST_SCORE"]
     finally:
         conn.close()
