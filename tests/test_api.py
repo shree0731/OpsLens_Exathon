@@ -88,6 +88,35 @@ def test_get_timeline():
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, list)
+    if data:
+        first = data[0]
+        assert "id" in first
+        assert "category" in first
+        assert "kind" in first
+        assert "severity" in first
+        assert "title" in first
+        assert "timestamp" in first
+
+
+def test_get_timeline_summary():
+    response = client.get("/api/timeline/summary")
+    assert response.status_code == 200
+    data = response.json()
+    assert "open_alerts" in data
+    assert "mttd_seconds" in data
+    assert "mttr_seconds" in data
+
+
+def test_get_runs_calendar():
+    response = client.get("/api/runs/calendar?days=14")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) > 0
+    first = data[0]
+    assert "date" in first
+    assert "status" in first
+    assert "succeeded_jobs" in first
 
 
 def test_get_cost_radar():

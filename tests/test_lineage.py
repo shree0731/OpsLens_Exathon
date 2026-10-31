@@ -60,7 +60,19 @@ def test_lineage_response_shape_and_blast_radius():
             assert "affected_count" in br
             assert "affected_node_ids" in br
             assert "by_type" in br
-            assert "tables" in br["summary"] and "marts" in br["summary"] and "dashboards" in br["summary"]
+            assert "tables" in br["summary"] and "marts" in br["summary"] and "dashboards" in br["summary"] and "jobs" in br["summary"]
             assert "table" in br["by_type"]
             assert "mart" in br["by_type"]
             assert "dashboard" in br["by_type"]
+            assert "job" in br["by_type"]
+
+
+def test_blast_radius_includes_jobs_and_counts():
+    b = get_blast_radius("ORDERS")
+    assert "job_build_revenue_mart" in b["affected_node_ids"]
+    assert len(b["affected_jobs"]) > 0
+    assert "job_build_revenue_mart" in b["affected_node_ids"]
+    assert "tables" in b["impact_summary"]
+    assert "marts" in b["impact_summary"]
+    assert "dashboards" in b["impact_summary"]
+    assert "jobs" in b["impact_summary"]

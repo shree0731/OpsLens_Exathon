@@ -90,6 +90,7 @@ export interface BannerBlast {
   label: string;
   summary: string;
   affected_node_ids: string[];
+  severity?: SeverityLevel | string;
 }
 
 export interface LineageGraphResponse {
@@ -97,6 +98,7 @@ export interface LineageGraphResponse {
   edges: LineageEdge[];
   total_nodes: number;
   total_edges: number;
+  banners?: BannerBlast[];
   banner_blast?: BannerBlast | null;
 }
 
@@ -195,18 +197,48 @@ export interface PipelineRunItem {
   start_time: string;
   end_time: string;
   duration_sec: number;
-  status: string;
+  status: 'SUCCESS' | 'WARNING' | 'FAILED' | 'SKIPPED' | string;
   rows_loaded: number;
   error_message?: string | null;
   is_simulated: boolean;
+  baseline_duration_sec?: number;
+  z_score?: number;
+  node_id?: string | null;
+  related_alert?: string | null;
+}
+
+export interface DaySummaryItem {
+  date: string;
+  display_date: string;
+  day_of_week: string;
+  status: 'success' | 'warning' | 'failed' | string;
+  total_jobs: number;
+  succeeded_jobs: number;
+  late_jobs: number;
+  failed_jobs: number;
+  total_rows: number;
 }
 
 export interface TimelineEventItem {
-  event_id: string;
-  event_type: 'PIPELINE_RUN' | 'SENTINEL_CHECK' | 'ALERT_OPEN' | 'ALERT_RESOLVED' | 'FAULT_INJECTION';
-  category: string;
-  severity: string;
+  id: string;
+  category: 'ALERT' | 'FAULT_INJECTION' | 'RECOVERY' | 'PIPELINE_RUN' | string;
+  kind: 'alert_opened' | 'alert_resolved' | 'fault_injected' | 'recovery' | 'pipeline_run' | string;
+  severity: 'CRITICAL' | 'WARNING' | 'INFO' | string;
   title: string;
+  target: string;
+  node_id?: string | null;
   description: string;
-  event_timestamp: string;
+  status: string;
+  timestamp: string;
+  evidence?: any;
+  suggested_root_cause?: string | null;
+  recommended_action?: string | null;
+  run_id?: string | null;
+  incident_id?: string | null;
+}
+
+export interface TimelineSummary {
+  open_alerts: number;
+  mttd_seconds: number;
+  mttr_seconds: number;
 }

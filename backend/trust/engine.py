@@ -347,8 +347,8 @@ def calculate_all_trust_scores(conn=None) -> List[Dict[str, Any]]:
                 "STATUS": get_status(dash_total),
             })
 
-        # 4. Persist to OPSLENS.TRUST_SCORES
-        conn.execute("TRUNCATE TABLE OPSLENS.TRUST_SCORES")
+        # 4. Persist to OPSLENS.TRUST_SCORES (only replace live records, never wipe simulated history)
+        conn.execute("DELETE FROM OPSLENS.TRUST_SCORES WHERE IS_SIMULATED = FALSE")
         if scores_list:
             sc_clauses = []
             for sc in scores_list:
@@ -356,7 +356,7 @@ def calculate_all_trust_scores(conn=None) -> List[Dict[str, Any]]:
                 sc_clauses.append(
                     f"('{sc_id}', '{sc['OBJECT_NAME']}', '{sc['OBJECT_TYPE']}', "
                     f"{sc['TRUST_SCORE']}, {sc['FRESHNESS_SCORE']}, {sc['COMPLETENESS_SCORE']}, "
-                    f"{sc['UNIQUENESS_SCORE']}, {sc['CONSISTENCY_SCORE']}, '{sc['STATUS']}', CURRENT_TIMESTAMP, TRUE)"
+                    f"{sc['UNIQUENESS_SCORE']}, {sc['CONSISTENCY_SCORE']}, '{sc['STATUS']}', CURRENT_TIMESTAMP, FALSE)"
                 )
             conn.execute(f"""
                 INSERT INTO OPSLENS.TRUST_SCORES 
@@ -367,6 +367,71 @@ def calculate_all_trust_scores(conn=None) -> List[Dict[str, Any]]:
 
         return scores_list
 
+    finally:
+        if should_close and conn:
+            conn.close()
+
+
+def seed_trust_history_if_needed(conn=None):
+    """Seeds 14 days of clean-state simulated trust score history for all 11 objects."""
+    should_close = False
+    if conn is None:
+        conn = get_connection(schema="OPSLENS")
+        should_close = True
+
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM OPSLENS.TRUST_SCORES WHERE IS_SIMULATED = TRUE").fetchall()[0][0]
+        if count >= 100:
+            return count
+
+        objects = [
+            ("ORDERS", "table"),
+            ("LINEITEM", "table"),
+            ("CUSTOMER", "table"),
+            ("ENERGY_READINGS", "table"),
+            ("ENERGY_METERS", "table"),
+            ("WEATHER_DAILY", "table"),
+            ("REVENUE_MART", "mart"),
+            ("GRID_OPS_MART", "mart"),
+            ("Revenue Dashboard", "dashboard"),
+            ("Smart Grid Dashboard", "dashboard"),
+            ("Executive Ops Dashboard", "dashboard"),
+        ]
+
+        clauses = []
+        import random
+        random.seed(42)
+
+        for d in range(14, 0, -1):
+            for obj_name, obj_type in objects:
+                sc_id = f"trs_hist_{obj_name[:4].lower()}_{d}_{uuid.uuid4().hex[:6]}"
+                base_score = 99.4
+                if d == 7 and obj_name == "ORDERS":
+                    base_score = 96.8
+                elif d == 4 and obj_name == "ENERGY_READINGS":
+                    base_score = 97.5
+
+                score = round(base_score + (random.uniform(-0.6, 0.6)), 1)
+                score = max(95.0, min(100.0, score))
+                f_score = round(min(100.0, score + 0.4), 1)
+                c_score = round(min(100.0, score + 0.2), 1)
+                u_score = 100.0
+                s_score = round(min(100.0, score - 0.2), 1)
+                status = "GREEN"
+
+                clauses.append(
+                    f"('{sc_id}', '{obj_name}', '{obj_type}', {score}, {f_score}, {c_score}, {u_score}, {s_score}, "
+                    f"'{status}', CURRENT_TIMESTAMP - INTERVAL '{d}' DAY, TRUE)"
+                )
+
+        if clauses:
+            conn.execute(f"""
+                INSERT INTO OPSLENS.TRUST_SCORES 
+                (SCORE_ID, OBJECT_NAME, OBJECT_TYPE, TRUST_SCORE, FRESHNESS_SCORE, 
+                 COMPLETENESS_SCORE, UNIQUENESS_SCORE, CONSISTENCY_SCORE, STATUS, COMPUTED_AT, IS_SIMULATED)
+                VALUES {', '.join(clauses)}
+            """)
+        return len(clauses)
     finally:
         if should_close and conn:
             conn.close()

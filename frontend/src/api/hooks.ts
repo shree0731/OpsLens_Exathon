@@ -12,6 +12,10 @@ import type {
   AlertItem,
   FaultStatusResponse,
   FaultInjectionResponse,
+  TimelineEventItem,
+  TimelineSummary,
+  PipelineRunItem,
+  DaySummaryItem,
 } from '../types/api';
 
 export const QUERY_KEYS = {
@@ -21,8 +25,10 @@ export const QUERY_KEYS = {
   trustHistory: (name?: string) => ['trustHistory', name],
   alerts: (status?: string) => ['alerts', status],
   faultStatus: ['faultStatus'],
-  runs: ['runs'],
+  runs: (filters?: Record<string, any>) => ['runs', filters],
+  runsCalendar: ['runsCalendar'],
   timeline: ['timeline'],
+  timelineSummary: ['timelineSummary'],
 };
 
 // 1. Lineage Graph (refetches every 5 seconds on lineage page)
@@ -80,7 +86,53 @@ export function useFaultStatus(refetchInterval: number | false = 5000) {
   });
 }
 
-// 7. Inject Fault Mutation
+// 7. Timeline Events (polling every 5 seconds)
+export function useTimelineEvents(refetchInterval: number | false = 5000) {
+  return useQuery<TimelineEventItem[]>({
+    queryKey: QUERY_KEYS.timeline,
+    queryFn: () => fetchApi<TimelineEventItem[]>('/api/timeline'),
+    refetchInterval,
+  });
+}
+
+// 8. Timeline Summary Metrics (MTTD, MTTR, Open Alerts)
+export function useTimelineSummary(refetchInterval: number | false = 5000) {
+  return useQuery<TimelineSummary>({
+    queryKey: QUERY_KEYS.timelineSummary,
+    queryFn: () => fetchApi<TimelineSummary>('/api/timeline/summary'),
+    refetchInterval,
+  });
+}
+
+// 9. Pipeline Runs Telemetry
+export function usePipelineRuns(
+  filters?: { days?: number; jobId?: string; date?: string },
+  refetchInterval: number | false = 5000
+) {
+  return useQuery<PipelineRunItem[]>({
+    queryKey: QUERY_KEYS.runs(filters),
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (filters?.days) params.set('days', filters.days.toString());
+      if (filters?.jobId) params.set('job_id', filters.jobId);
+      if (filters?.date) params.set('date', filters.date);
+      const queryStr = params.toString() ? `?${params.toString()}` : '';
+      return fetchApi<PipelineRunItem[]>(`/api/runs${queryStr}`);
+    },
+    refetchInterval,
+  });
+}
+
+// 10. Runs 14-day Calendar
+export function useRunsCalendar(days = 14, refetchInterval: number | false = 10000) {
+  return useQuery<DaySummaryItem[]>({
+    queryKey: QUERY_KEYS.runsCalendar,
+    queryFn: () => fetchApi<DaySummaryItem[]>(`/api/runs/calendar?days=${days}`),
+    refetchInterval,
+  });
+}
+
+// 11. Inject Fault Mutation
 export function useInjectFaultMutation() {
   const queryClient = useQueryClient();
   return useMutation<FaultInjectionResponse, Error, string>({
@@ -94,11 +146,15 @@ export function useInjectFaultMutation() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.alerts() });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.trust });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.faultStatus });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.timeline });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.timelineSummary });
+      queryClient.invalidateQueries({ queryKey: ['runs'] });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.runsCalendar });
     },
   });
 }
 
-// 8. Reset Mutation
+// 12. Reset Mutation
 export function useResetFaultsMutation() {
   const queryClient = useQueryClient();
   return useMutation<{ status: string; message?: string }, Error, void>({
@@ -112,11 +168,15 @@ export function useResetFaultsMutation() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.alerts() });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.trust });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.faultStatus });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.timeline });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.timelineSummary });
+      queryClient.invalidateQueries({ queryKey: ['runs'] });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.runsCalendar });
     },
   });
 }
 
-// 9. Run Checks Mutation
+// 13. Run Checks Mutation
 export function useRunChecksMutation() {
   const queryClient = useQueryClient();
   return useMutation<any, Error, void>({
@@ -129,6 +189,8 @@ export function useRunChecksMutation() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.health });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.alerts() });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.trust });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.timeline });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.timelineSummary });
     },
   });
 }

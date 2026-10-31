@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback, useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   ReactFlow,
   MiniMap,
@@ -111,9 +112,18 @@ export const LineageCanvas: React.FC<LineageCanvasProps> = ({
   error,
   onRetry,
 }) => {
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const urlNodeParam = searchParams.get('node');
+
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(urlNodeParam);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  useEffect(() => {
+    if (urlNodeParam) {
+      setSelectedNodeId(urlNodeParam);
+    }
+  }, [urlNodeParam]);
 
   // Collect all affected node IDs from any node with an active blast radius or open alert
   const activeBlastRadius = useMemo(() => {
@@ -300,6 +310,7 @@ export const LineageCanvas: React.FC<LineageCanvasProps> = ({
               }
             : null
         }
+        banners={data?.banners || []}
         onShowDetails={(nid) => setSelectedNodeId(nid)}
       />
 

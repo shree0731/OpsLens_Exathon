@@ -258,7 +258,8 @@ def get_lineage_graph(conn=None) -> Dict[str, Any]:
             n_tables = len(by_type.get("table", []))
             m_marts = len(by_type.get("mart", []))
             k_dashboards = len(by_type.get("dashboard", []))
-            summary_str = f"Failure in {node['label']} affects {n_tables} tables, {m_marts} marts and {k_dashboards} dashboards"
+            j_jobs = len(by_type.get("job", []))
+            summary_str = f"Failure in {node['label']} affects {n_tables} tables, {m_marts} marts, {k_dashboards} dashboards and {j_jobs} jobs"
 
             node["blast_radius"] = {
                 "summary": summary_str,
@@ -268,21 +269,54 @@ def get_lineage_graph(conn=None) -> Dict[str, Any]:
             }
 
             if has_alerts:
+                max_sev = "WARNING"
+                if any(a.get("severity") == "CRITICAL" for a in node["active_alerts"]):
+                    max_sev = "CRITICAL"
+                elif any(a.get("severity") == "WARNING" for a in node["active_alerts"]):
+                    max_sev = "WARNING"
+                else:
+                    max_sev = "INFO"
+
                 banner_blasts.append({
                     "node_id": nid,
                     "label": node["label"],
+                    "severity": max_sev,
                     "summary": summary_str,
                     "affected_node_ids": affected_ids,
                 })
         else:
             node["blast_radius"] = None
 
+    # Sort banners by severity: CRITICAL first, then WARNING, then INFO
+    severity_order = {"CRITICAL": 3, "WARNING": 2, "INFO": 1}
+    banner_blasts.sort(key=lambda b: severity_order.get(b.get("severity", "INFO"), 0), reverse=True)
+
+    # If multiple sources have open alerts, construct one combined summary naming each source
+    combined_banner = None
+    if len(banner_blasts) > 1:
+        source_names = ", ".join(b["label"] for b in banner_blasts)
+        all_affected = list(set(nid for b in banner_blasts for nid in b["affected_node_ids"]))
+        c_tables = sum(1 for cid in all_affected if nodes_dict.get(cid, {}).get("type") == "table")
+        c_marts = sum(1 for cid in all_affected if nodes_dict.get(cid, {}).get("type") == "mart")
+        c_dash = sum(1 for cid in all_affected if nodes_dict.get(cid, {}).get("type") == "dashboard")
+        c_jobs = sum(1 for cid in all_affected if nodes_dict.get(cid, {}).get("type") == "job")
+        combined_banner = {
+            "node_id": "multiple",
+            "label": source_names,
+            "severity": banner_blasts[0]["severity"],
+            "summary": f"Failures in {source_names} affect {c_tables} tables, {c_marts} marts, {c_dash} dashboards and {c_jobs} jobs",
+            "affected_node_ids": all_affected,
+        }
+    elif len(banner_blasts) == 1:
+        combined_banner = banner_blasts[0]
+
     return {
         "nodes": list(nodes_dict.values()),
         "edges": edges_list,
         "total_nodes": len(nodes_dict),
         "total_edges": len(edges_list),
-        "banner_blast": banner_blasts[0] if banner_blasts else None,
+        "banners": banner_blasts,
+        "banner_blast": combined_banner,
     }
 
 
@@ -339,6 +373,8 @@ def get_blast_radius(node_id: str, conn=None) -> Dict[str, Any]:
     affected_nodes = []
     affected_dashboards = []
     affected_marts = []
+    affected_jobs = []
+    affected_tables = []
 
     while queue:
         curr = queue.popleft()
@@ -353,6 +389,10 @@ def get_blast_radius(node_id: str, conn=None) -> Dict[str, Any]:
                     affected_dashboards.append(child_meta["label"])
                 elif child_meta["type"] == "mart":
                     affected_marts.append(child_meta["label"])
+                elif child_meta["type"] == "job":
+                    affected_jobs.append(child_meta["label"])
+                elif child_meta["type"] == "table":
+                    affected_tables.append(child_meta["label"])
 
     # BFS Upstream (Root Causes)
     visited_up: Set[str] = set()
@@ -371,12 +411,21 @@ def get_blast_radius(node_id: str, conn=None) -> Dict[str, Any]:
                 visited_up.add(parent)
                 queue_up.append(parent)
 
+    n_t = len(set(affected_tables))
+    m_m = len(set(affected_marts))
+    k_d = len(set(affected_dashboards))
+    j_j = len(set(affected_jobs))
+    lbl = node_meta.get(target_node, {}).get("label", target_node)
+
     return {
         "target_node": node_meta.get(target_node, {"id": target_node}),
-        "impact_summary": f"Incident on {target_node} cascades to {len(affected_nodes)} downstream dependencies across {len(affected_dashboards)} business dashboards.",
+        "impact_summary": f"Failure in {lbl} affects {n_t} tables, {m_m} marts, {k_d} dashboards and {j_j} jobs",
         "affected_count": len(affected_nodes),
         "affected_dashboards": list(set(affected_dashboards)),
         "affected_marts": list(set(affected_marts)),
+        "affected_jobs": list(set(affected_jobs)),
+        "affected_tables": list(set(affected_tables)),
+        "affected_node_ids": list(visited_down),
         "affected_nodes": affected_nodes,
         "upstream_sources": upstream_sources,
     }

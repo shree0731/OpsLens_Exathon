@@ -1,6 +1,7 @@
 import React from 'react';
 import { useHealth } from '../../api/hooks';
 import { StatusBadge } from '../common/StatusBadge';
+import { MiniFaultToolbar } from './MiniFaultToolbar';
 import { Activity, Database, AlertCircle } from 'lucide-react';
 
 interface TopBarProps {
@@ -25,12 +26,15 @@ export const TopBar: React.FC<TopBarProps> = ({ pageTitle = 'Data Pipeline Linea
         </span>
       </div>
 
-      {/* Live Status Chip & Simulated Data Note */}
+      {/* Persistent Mini Fault Toolbar & Live Status Chip */}
       <div className="flex items-center gap-3">
+        {/* Global Mini Fault Toolbar */}
+        <MiniFaultToolbar />
+
         {/* Global Simulated Data Chip */}
-        <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200/80">
+        <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200/80">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-          Simulated Workload
+          Simulated
         </span>
 
         {/* Live Cluster Health & Trust Chip */}
