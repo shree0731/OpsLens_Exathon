@@ -2,8 +2,7 @@
 
 **Exathon 2026 | Track 04: Operational Intelligence & Query Observability**  
 **Demo Video URL**: [Google Drive Video](https://drive.google.com/file/d/1V59pWLqsvTiOrrAqUBy4HY0FyUB-to8r/view?usp=sharing)  
-**Pitch Deck**: [Google Slides Presentation](https://docs.google.com/presentation/d/1VBVs-IdfjDUDN7AQu7Hzh_8jVjnHdRqL/edit?usp=sharing&ouid=110330912071145646436&rtpof=true&sd=true) | [docs/OpsLens_Pitch_Deck.pdf](OpsLens_Pitch_Deck.pdf)  
-**Target Duration**: 03:00 Minutes  
+**Pitch Deck**: [Google Slides Presentation](https://docs.google.com/presentation/d/1VBVs-IdfjDUDN7AQu7Hzh_8jVjnHdRqL/edit?usp=sharing&ouid=110330912071145646436&rtpof=true&sd=true)
 **Pages Used**: `/lineage`, `/timeline`, `/runs`  
 
 ---
