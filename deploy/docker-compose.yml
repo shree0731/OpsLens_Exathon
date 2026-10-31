@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # Optional: Exasol Personal Edition Docker container for local testing
+  exasol:
+    image: exasol/docker-db:latest
+    container_name: opslens-exasol
+    ports:
+      - "8563:8563"
+    environment:
+      - EXA_MEM=2G
+    restart: unless-stopped
+
+  # OpsLens FastAPI Backend
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    container_name: opslens-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    depends_on:
+      - exasol
+    restart: unless-stopped

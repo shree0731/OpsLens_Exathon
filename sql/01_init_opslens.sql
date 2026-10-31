@@ -1,0 +1,36 @@
+-- ========================================================
+-- OpsLens Schema Initialization
+-- Exathon 2026 Track 04
+-- ========================================================
+
+-- Create the dedicated application schema
+CREATE SCHEMA IF NOT EXISTS OPSLENS;
+
+-- Open schema for subsequent table creations
+OPEN SCHEMA OPSLENS;
+
+-- Example: OpsLens query execution log table
+CREATE TABLE IF NOT EXISTS OPSLENS.QUERY_LOGS (
+    LOG_ID VARCHAR(64) PRIMARY KEY,
+    SESSION_ID DECIMAL(18,0),
+    USER_NAME VARCHAR(128),
+    STATEMENT_TEXT VARCHAR(2000),
+    START_TIME TIMESTAMP,
+    STOP_TIME TIMESTAMP,
+    DURATION_SECONDS DOUBLE PRECISION,
+    STATUS VARCHAR(32),
+    ERROR_MESSAGE VARCHAR(2000),
+    ROWS_AFFECTED DECIMAL(18,0),
+    CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Example: OpsLens detected incidents / alerts table
+CREATE TABLE IF NOT EXISTS OPSLENS.INCIDENTS (
+    INCIDENT_ID VARCHAR(64) PRIMARY KEY,
+    INCIDENT_TYPE VARCHAR(64),
+    SEVERITY VARCHAR(32),
+    DETAILS VARCHAR(2000),
+    ROOT_CAUSE VARCHAR(2000),
+    RESOLVED BOOLEAN DEFAULT FALSE,
+    CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
