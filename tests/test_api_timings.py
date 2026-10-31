@@ -9,8 +9,11 @@ Ensures all latencies are well under the 8.0-second threshold.
 """
 
 import time
+import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
+
+pytestmark = pytest.mark.slow
 
 client = TestClient(app)
 

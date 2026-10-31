@@ -12,6 +12,8 @@ from backend.sentinel.run import execute_sentinel
 from backend.trust.engine import calculate_all_trust_scores
 from backend.lineage import get_blast_radius
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.fixture(scope="module")
 def conn():

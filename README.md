@@ -144,11 +144,38 @@ Interactive Swagger documentation is available at `http://127.0.0.1:8000/docs`.
 
 ---
 
-## 7. Running Tests & Demo
+## 7. Frontend Application (React SPA)
+
+The OpsLens UI is a Vite + React + TypeScript single-page application built with Tailwind CSS, `@xyflow/react` interactive DAG canvas, and TanStack Query.
 
 ```bash
-# Run full Pytest test suite (34 tests)
-python -m pytest -v
+# Navigate to frontend
+cd frontend
+
+# Install dependencies
+npm install
+
+# Start development server on port 5173
+npm run dev
+
+# Build for production
+npm run build
+```
+Accessible at [http://localhost:5173](http://localhost:5173).
+
+---
+
+## 8. Running Tests & Demo
+
+```bash
+# Run fast test suite (excludes slow matrix & timing benchmarks):
+pytest -m "not slow" -v
+
+# Run slow fault matrix and latency SLA benchmarks:
+pytest -m slow -v
+
+# Run entire test suite:
+pytest -v
 
 # Run live end-to-end demonstration sequence
 python -m backend.demo

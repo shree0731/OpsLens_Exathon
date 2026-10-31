@@ -1,0 +1,72 @@
+@import '@xyflow/react/dist/style.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #F8FAFC;
+    color: #0F172A;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom react-flow adjustments */
+.react-flow__attribution {
+  display: none !important;
+}
+
+.react-flow__edge-path {
+  stroke-width: 2px;
+}
+
+.react-flow__controls {
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  border: 1px solid #E2E8F0;
+}
+
+.react-flow__controls-button {
+  background: #FFFFFF;
+  border-bottom: 1px solid #F1F5F9;
+  color: #475569;
+}
+
+.react-flow__controls-button:hover {
+  background: #F8FAFC;
+}
+
+/* Pulse animation for blast radius */
+@keyframes pulse-ring-red {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.animate-pulse-ring-red {
+  animation: pulse-ring-red 2s infinite;
+}
+
+@keyframes pulse-ring-amber {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(245, 158, 11, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+}
+
+.animate-pulse-ring-amber {
+  animation: pulse-ring-amber 2s infinite;
+}

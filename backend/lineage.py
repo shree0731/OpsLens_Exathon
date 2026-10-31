@@ -10,7 +10,7 @@ from backend.db import get_connection
 
 
 def fetch_lineage_data(conn=None):
-    """Fetches edges and current trust scores from Exasol."""
+    """Fetches edges, current trust scores, active alerts, and latest job runs from Exasol."""
     should_close = False
     if conn is None:
         conn = get_connection(schema="OPSLENS")
@@ -33,87 +33,256 @@ def fetch_lineage_data(conn=None):
 
         # Fetch trust scores
         scores_rows = conn.execute("""
-            SELECT OBJECT_NAME, TRUST_SCORE, STATUS 
+            SELECT OBJECT_NAME, OBJECT_TYPE, TRUST_SCORE, 
+                   FRESHNESS_SCORE, COMPLETENESS_SCORE, UNIQUENESS_SCORE, CONSISTENCY_SCORE, STATUS 
             FROM OPSLENS.TRUST_SCORES
         """).fetchall()
-        trust_map = {r[0]: {"trust_score": float(r[1]), "status": r[2]} for r in scores_rows}
+        trust_map = {
+            r[0]: {
+                "object_name": r[0],
+                "object_type": r[1],
+                "trust_score": float(r[2]),
+                "freshness_score": float(r[3]),
+                "completeness_score": float(r[4]),
+                "uniqueness_score": float(r[5]),
+                "consistency_score": float(r[6]),
+                "status": r[7],
+            }
+            for r in scores_rows
+        }
 
-        # Fetch active alerts
+        # Fetch active open alerts
         alert_rows = conn.execute("""
-            SELECT TARGET_OBJECT, INCIDENT_TYPE, SEVERITY 
+            SELECT ALERT_ID, INCIDENT_TYPE, SEVERITY, TARGET_OBJECT, SUMMARY, DETAILS, 
+                   SUGGESTED_ROOT_CAUSE, RECOMMENDED_ACTION, STATUS, FIRST_SEEN
             FROM OPSLENS.ALERTS 
             WHERE STATUS = 'OPEN'
         """).fetchall()
-        alerts_map = defaultdict(list)
-        for r in alert_rows:
-            obj_clean = r[0].replace("OPSLENS.", "").strip()
-            alerts_map[obj_clean].append({"type": r[1], "severity": r[2]})
+        
+        all_alerts = [
+            {
+                "alert_id": r[0],
+                "incident_type": r[1],
+                "severity": r[2],
+                "target_object": r[3],
+                "summary": r[4],
+                "details": r[5],
+                "suggested_root_cause": r[6],
+                "recommended_action": r[7],
+                "status": r[8],
+                "first_seen": str(r[9]),
+            }
+            for r in alert_rows
+        ]
 
-        return edges_rows, trust_map, alerts_map
+        # Fetch latest run per job
+        run_rows = conn.execute("""
+            SELECT JOB_ID, STAGE, STATUS, START_TIME, END_TIME, DURATION_SEC, ROWS_LOADED, ERROR_MESSAGE
+            FROM OPSLENS.PIPELINE_RUN_LOG
+            ORDER BY START_TIME DESC
+        """).fetchall()
+        latest_runs = {}
+        for r in run_rows:
+            jid = r[0]
+            if jid not in latest_runs:
+                latest_runs[jid] = {
+                    "job_id": r[0],
+                    "stage": r[1],
+                    "status": r[2],
+                    "start_time": str(r[3]),
+                    "end_time": str(r[4]),
+                    "duration_sec": float(r[5]) if r[5] is not None else 0.0,
+                    "rows_loaded": int(r[6]) if r[6] is not None else 0,
+                    "error_message": r[7],
+                }
+
+        return edges_rows, trust_map, all_alerts, latest_runs
 
     finally:
         if should_close and conn:
             conn.close()
 
 
+def _matches_target(target_obj: str, node_id: str, label: str) -> bool:
+    """Robustly matches target_object from alert to node id or label."""
+    t = target_obj.replace("OPSLENS.", "").strip().lower()
+    nid = node_id.lower()
+    lbl = label.lower()
+    nid_stripped = nid.replace("tbl_", "").replace("job_", "").replace("mart_", "").replace("dash_", "").replace("feed_", "")
+    return t in (nid, lbl, nid_stripped)
+
+
 def get_lineage_graph(conn=None) -> Dict[str, Any]:
     """
-    Returns complete lineage graph with nodes and directed edges.
-    Nodes include type, label, trust_score, status, and active alerts.
+    Returns complete lineage graph with nodes, directed edges, and computed blast radii.
+    - Each node status is the worse of (trust-score status, highest alert severity).
+    - Degraded nodes include active_alerts, inherited_from alerts, and a blast_radius object.
     """
-    edges_rows, trust_map, alerts_map = fetch_lineage_data(conn)
+    edges_rows, trust_map, all_alerts, latest_runs = fetch_lineage_data(conn)
 
     nodes_dict: Dict[str, Dict[str, Any]] = {}
     edges_list: List[Dict[str, Any]] = []
+    downstream_adj: Dict[str, List[str]] = defaultdict(list)
+    upstream_adj: Dict[str, List[str]] = defaultdict(list)
 
+    # 1. Collect all nodes and edges
     for r in edges_rows:
         edge_id, src_id, src_type, src_lbl, tgt_id, tgt_type, tgt_lbl, rel_type = r
 
-        # Add Source Node
+        downstream_adj[src_id].append(tgt_id)
+        upstream_adj[tgt_id].append(src_id)
+
         if src_id not in nodes_dict:
-            src_clean = src_id.replace("OPSLENS.", "").strip()
-            trust_info = trust_map.get(src_clean) or trust_map.get(src_lbl) or {"trust_score": 100.0, "status": "GREEN"}
-            has_critical = any(a["severity"] == "CRITICAL" for a in alerts_map.get(src_clean, []))
-            node_status = "RED" if has_critical else trust_info["status"]
-            
             nodes_dict[src_id] = {
                 "id": src_id,
                 "label": src_lbl,
                 "type": src_type.lower(),
-                "trust_score": trust_info["trust_score"],
-                "status": node_status,
-                "active_alerts": alerts_map.get(src_clean, []),
             }
 
-        # Add Target Node
         if tgt_id not in nodes_dict:
-            tgt_clean = tgt_id.replace("OPSLENS.", "").strip()
-            trust_info = trust_map.get(tgt_clean) or trust_map.get(tgt_lbl) or {"trust_score": 100.0, "status": "GREEN"}
-            has_critical = any(a["severity"] == "CRITICAL" for a in alerts_map.get(tgt_clean, []))
-            node_status = "RED" if has_critical else trust_info["status"]
-
             nodes_dict[tgt_id] = {
                 "id": tgt_id,
                 "label": tgt_lbl,
                 "type": tgt_type.lower(),
-                "trust_score": trust_info["trust_score"],
-                "status": node_status,
-                "active_alerts": alerts_map.get(tgt_clean, []),
             }
 
-        # Add Edge
         edges_list.append({
             "edge_id": edge_id,
             "source": src_id,
             "target": tgt_id,
+            "relation": rel_type,
             "relation_type": rel_type,
         })
+
+    # 2. Attach direct active alerts to nodes
+    for nid, node in nodes_dict.items():
+        lbl = node["label"]
+        matched_alerts = [a for a in all_alerts if _matches_target(a["target_object"], nid, lbl)]
+        node["active_alerts"] = matched_alerts
+
+    # 3. Compute inherited alerts for downstream nodes (BFS upstream)
+    for nid, node in nodes_dict.items():
+        inherited = []
+        visited_up = set()
+        queue = deque([nid])
+
+        while queue:
+            curr = queue.popleft()
+            for parent_id in upstream_adj.get(curr, []):
+                if parent_id not in visited_up:
+                    visited_up.add(parent_id)
+                    queue.append(parent_id)
+                    parent_node = nodes_dict.get(parent_id, {})
+                    for pa in parent_node.get("active_alerts", []):
+                        inherited.append({
+                            "source_node_id": parent_id,
+                            "source_label": parent_node.get("label", parent_id),
+                            "source_type": parent_node.get("type", "unknown"),
+                            "alert_id": pa["alert_id"],
+                            "incident_type": pa["incident_type"],
+                            "severity": pa["severity"],
+                            "summary": pa["summary"],
+                            "suggested_root_cause": pa.get("suggested_root_cause"),
+                            "recommended_action": pa.get("recommended_action"),
+                        })
+        node["inherited_from"] = inherited
+
+    # 4. Attach trust scores, component scores, job metadata, and compute displayed status
+    for nid, node in nodes_dict.items():
+        lbl = node["label"]
+        ntype = node["type"]
+
+        clean_id = nid.replace("tbl_", "").replace("job_", "").replace("mart_", "").replace("dash_", "").replace("feed_", "")
+        trust_info = trust_map.get(lbl) or trust_map.get(nid) or trust_map.get(clean_id) or {
+            "trust_score": 100.0,
+            "freshness_score": 100.0,
+            "completeness_score": 100.0,
+            "uniqueness_score": 100.0,
+            "consistency_score": 100.0,
+            "status": "GREEN",
+        }
+
+        node["trust_score"] = trust_info["trust_score"]
+        node["component_scores"] = {
+            "freshness": trust_info["freshness_score"],
+            "completeness": trust_info["completeness_score"],
+            "uniqueness": trust_info["uniqueness_score"],
+            "consistency": trust_info["consistency_score"],
+        }
+
+        if ntype == "job":
+            job_name = lbl
+            node["last_run"] = latest_runs.get(job_name)
+
+        # Worse of: (trust-score status, highest alert severity)
+        all_node_alerts = node["active_alerts"] + node["inherited_from"]
+        has_critical = any(a.get("severity") == "CRITICAL" for a in all_node_alerts)
+        has_warning = any(a.get("severity") == "WARNING" for a in all_node_alerts)
+
+        if trust_info["status"] == "RED" or node["trust_score"] < 70.0 or has_critical:
+            displayed_status = "RED"
+        elif trust_info["status"] == "AMBER" or node["trust_score"] < 85.0 or has_warning:
+            displayed_status = "AMBER"
+        else:
+            displayed_status = "GREEN"
+
+        node["status"] = displayed_status
+
+    # 5. Compute blast radius for degraded nodes or nodes with open alerts
+    banner_blasts = []
+    for nid, node in nodes_dict.items():
+        has_alerts = len(node["active_alerts"]) > 0
+        is_degraded = node["status"] != "GREEN" or node["trust_score"] < 85.0
+
+        if has_alerts or is_degraded:
+            # BFS downstream traversal
+            visited_down = set()
+            q_down = deque([nid])
+            by_type = {"table": [], "mart": [], "dashboard": [], "job": []}
+            affected_ids = []
+
+            while q_down:
+                curr = q_down.popleft()
+                for child_id in downstream_adj.get(curr, []):
+                    if child_id not in visited_down:
+                        visited_down.add(child_id)
+                        q_down.append(child_id)
+                        affected_ids.append(child_id)
+                        c_meta = nodes_dict.get(child_id, {})
+                        c_type = c_meta.get("type", "").lower()
+                        if c_type in by_type:
+                            by_type[c_type].append(child_id)
+                        else:
+                            by_type.setdefault(c_type, []).append(child_id)
+
+            n_tables = len(by_type.get("table", []))
+            m_marts = len(by_type.get("mart", []))
+            k_dashboards = len(by_type.get("dashboard", []))
+            summary_str = f"Failure in {node['label']} affects {n_tables} tables, {m_marts} marts and {k_dashboards} dashboards"
+
+            node["blast_radius"] = {
+                "summary": summary_str,
+                "affected_count": len(affected_ids),
+                "affected_node_ids": affected_ids,
+                "by_type": by_type,
+            }
+
+            if has_alerts:
+                banner_blasts.append({
+                    "node_id": nid,
+                    "label": node["label"],
+                    "summary": summary_str,
+                    "affected_node_ids": affected_ids,
+                })
+        else:
+            node["blast_radius"] = None
 
     return {
         "nodes": list(nodes_dict.values()),
         "edges": edges_list,
         "total_nodes": len(nodes_dict),
         "total_edges": len(edges_list),
+        "banner_blast": banner_blasts[0] if banner_blasts else None,
     }
 
 
@@ -123,7 +292,7 @@ def get_blast_radius(node_id: str, conn=None) -> Dict[str, Any]:
     to determine all downstream tables, marts, and dashboards impacted.
     Also traverses upstream to find root source dependencies.
     """
-    edges_rows, trust_map, alerts_map = fetch_lineage_data(conn)
+    edges_rows, trust_map, all_alerts, latest_runs = fetch_lineage_data(conn)
 
     # Build adjacency lists
     downstream_adj: Dict[str, List[str]] = defaultdict(list)
