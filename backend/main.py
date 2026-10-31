@@ -925,3 +925,72 @@ def get_baselines():
         ]
     finally:
         conn.close()
+
+
+# -------------------------------------------------------------
+# Ask-the-Warehouse (Text-to-SQL & Guardrails)
+# -------------------------------------------------------------
+class AskQuestionRequest(BaseModel):
+    question: str
+
+
+class ValidateSqlRequest(BaseModel):
+    sql: str
+
+
+class RunSqlRequest(BaseModel):
+    sql: str
+    question: Optional[str] = None
+
+
+@app.get("/api/ask/templates", tags=["Ask-the-Warehouse"])
+def get_ask_templates():
+    """Returns curated template questions with hand-crafted, verified SQL."""
+    from backend.ask.templates import TEMPLATE_QUESTIONS
+    return TEMPLATE_QUESTIONS
+
+
+@app.post("/api/ask", tags=["Ask-the-Warehouse"])
+def ask_question_endpoint(req: AskQuestionRequest):
+    """Translates natural language question into safe Exasol SQL with guardrails review."""
+    from backend.ask.engine import generate_ask_sql
+    if not req.question or not req.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+    
+    conn = get_connection(schema="OPSLENS")
+    try:
+        result = generate_ask_sql(req.question, conn=conn)
+        return result
+    finally:
+        conn.close()
+
+
+@app.post("/api/ask/validate", tags=["Ask-the-Warehouse"])
+def validate_sql_endpoint(req: ValidateSqlRequest):
+    """Reviews SQL against 5 security guardrails and validates syntax on Exasol."""
+    from backend.ask.guardrails import validate_guardrails
+    if not req.sql or not req.sql.strip():
+        raise HTTPException(status_code=400, detail="SQL cannot be empty.")
+
+    conn = get_connection(schema="OPSLENS")
+    try:
+        return validate_guardrails(req.sql, conn=conn)
+    finally:
+        conn.close()
+
+
+@app.post("/api/ask/run", tags=["Ask-the-Warehouse"])
+def run_ask_sql_endpoint(req: RunSqlRequest):
+    """Executes validated SQL query on Exasol, returning results and recording to QUERY_STATS."""
+    from backend.ask.engine import execute_ask_sql
+    if not req.sql or not req.sql.strip():
+        raise HTTPException(status_code=400, detail="SQL cannot be empty.")
+
+    conn = get_connection(schema="OPSLENS")
+    try:
+        res = execute_ask_sql(req.sql, question=req.question, conn=conn)
+        if not res["success"]:
+            raise HTTPException(status_code=400, detail=res["error"])
+        return res
+    finally:
+        conn.close()

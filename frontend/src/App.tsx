@@ -5,6 +5,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import { LineagePage } from './pages/LineagePage';
 import { TimelinePage } from './pages/TimelinePage';
 import { RunsPage } from './pages/RunsPage';
+import { AskPage } from './pages/AskPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 
 const queryClient = new QueryClient({
@@ -65,11 +66,8 @@ export const App: React.FC = () => {
           <Route
             path="/ask"
             element={
-              <AppLayout pageTitle="Ask OpsLens">
-                <PlaceholderPage
-                  title="Ask OpsLens"
-                  description="LLM-powered root cause analysis and natural language queries on pipeline telemetry."
-                />
+              <AppLayout pageTitle="Ask-the-Warehouse">
+                <AskPage />
               </AppLayout>
             }
           />
