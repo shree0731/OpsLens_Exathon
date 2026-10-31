@@ -40,6 +40,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Logs
+logs/
+*.log
+
 # IDE & OS
 .vscode/
 .idea/

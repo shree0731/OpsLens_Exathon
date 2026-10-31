@@ -42,6 +42,19 @@ COPIES = [
     },
 ]
 
+DEFAULT_CONFIG = [
+    ("reference_now", "2025-04-01 00:00:00", "Simulated reference clock for OpsLens freshness checks"),
+    ("expected_latest_energy", "2025-03-31 23:00:00", "Expected latest reading timestamp on clean energy stream"),
+    ("expected_latest_weather", "2025-12-31", "Expected latest observation date on clean weather feed"),
+    ("expected_latest_orders", "1998-08-02", "Expected latest order date in clean TPC-H orders"),
+    ("max_staleness_energy_hours", "2", "Max allowable staleness threshold for energy stream before alert"),
+    ("max_staleness_weather_days", "2", "Max allowable staleness threshold for weather stream before alert"),
+    ("reconciliation_tolerance_usd", "0.10", "Allowable price rounding tolerance between order and summed items"),
+    ("reconciliation_max_mismatch_pct", "0.01", "Max acceptable order mismatch ratio (0.01% = 0.0001)"),
+    ("row_drop_threshold_pct", "25.0", "Percentage drop threshold triggering row count anomaly alert"),
+    ("z_score_threshold", "3.0", "Z-score anomaly threshold for volume and duration"),
+]
+
 
 def execute_sql_file(conn, file_path: str):
     """Executes all statements in a SQL script file."""
@@ -50,10 +63,8 @@ def execute_sql_file(conn, file_path: str):
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Split by semicolon, clean comments and empty statements
     statements = [stmt.strip() for stmt in content.split(";") if stmt.strip()]
     for stmt in statements:
-        # Skip pure comment blocks
         lines = [line.strip() for line in stmt.split("\n") if line.strip() and not line.strip().startswith("--")]
         if not lines:
             continue
@@ -61,11 +72,28 @@ def execute_sql_file(conn, file_path: str):
         try:
             conn.execute(clean_stmt)
         except Exception as e:
-            # Skip harmless table already exists or schema exists
             err_msg = str(e)
             if "already exists" in err_msg or "name already used" in err_msg:
                 continue
             raise RuntimeError(f"Error executing statement: {clean_stmt[:100]}...\n{e}") from e
+
+
+def initialize_config_table(conn, force: bool = False):
+    """Initializes or resets OPSLENS.CONFIG with reference clock and thresholds."""
+    if force:
+        conn.execute("TRUNCATE TABLE OPSLENS.CONFIG")
+    for key, val, desc in DEFAULT_CONFIG:
+        # Check if key exists
+        res = conn.execute(f"SELECT COUNT(*) FROM OPSLENS.CONFIG WHERE PARAM_KEY = '{key}'").fetchall()
+        if not res or res[0][0] == 0:
+            conn.execute(
+                f"INSERT INTO OPSLENS.CONFIG (PARAM_KEY, PARAM_VALUE, DESCRIPTION, UPDATED_AT) "
+                f"VALUES ('{key}', '{val}', '{desc}', CURRENT_TIMESTAMP)"
+            )
+        elif force:
+            conn.execute(
+                f"UPDATE OPSLENS.CONFIG SET PARAM_VALUE = '{val}', UPDATED_AT = CURRENT_TIMESTAMP WHERE PARAM_KEY = '{key}'"
+            )
 
 
 def setup_opslens_schema(force_reload: bool = False) -> Dict[str, int]:
@@ -83,23 +111,25 @@ def setup_opslens_schema(force_reload: bool = False) -> Dict[str, int]:
 
     try:
         # 1. Ensure schema OPSLENS exists
-        print("[1/4] Initializing OPSLENS schema...")
+        print("[1/5] Initializing OPSLENS schema...")
         conn.execute("CREATE SCHEMA IF NOT EXISTS OPSLENS")
         conn.execute("OPEN SCHEMA OPSLENS")
 
         # 2. Apply metadata tables DDL
-        print("[2/4] Applying metadata tables DDL...")
+        print("[2/5] Applying metadata tables DDL...")
         sql_path = os.path.join("sql", "02_create_metadata_tables.sql")
         execute_sql_file(conn, sql_path)
 
-        # 3. Copy production tables from sample schemas
-        print("[3/4] Syncing production tables from sample schemas into OPSLENS...")
+        # 3. Configure Reference Clock and Operational Config
+        print("[3/5] Setting up OPSLENS.CONFIG reference clock...")
+        initialize_config_table(conn, force=force_reload)
+
+        # 4. Copy production tables from sample schemas
+        print("[4/5] Syncing production tables from sample schemas into OPSLENS...")
         for item in COPIES:
             target = item["target"]
             source = item["source"]
-            target_table_name = target.split(".")[1]
 
-            # Check if table already exists and has data
             table_exists = False
             curr_count = 0
             try:
@@ -121,8 +151,8 @@ def setup_opslens_schema(force_reload: bool = False) -> Dict[str, int]:
                 row_counts[target] = curr_count
                 print(f"     [EXISTS] {target} already has {curr_count:,} rows (skipping copy)")
 
-        # 4. Create sample marts in OPSLENS
-        print("[4/4] Ensuring analytical marts exist in OPSLENS...")
+        # 5. Create sample marts in OPSLENS
+        print("[5/5] Ensuring analytical marts exist in OPSLENS...")
         # Revenue Mart
         conn.execute("""
             CREATE OR REPLACE TABLE OPSLENS.REVENUE_MART AS

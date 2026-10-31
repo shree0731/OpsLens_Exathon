@@ -3,7 +3,7 @@ Unit tests for data generator components, jobs, lineage, and fault maps.
 """
 
 from data_generator.faults import FAULTS_MAP
-from data_generator.metadata_generator import JOBS_DEF, LINEAGE_EDGES_DATA
+from data_generator.metadata_generator import JOBS_DEF, LINEAGE_EDGES_DATA, CANONICAL_STAGES
 from data_generator.workload_generator import calculate_query_cost, QUERY_TEMPLATES
 
 
@@ -23,6 +23,9 @@ def test_faults_map_completeness():
 
 def test_jobs_definitions():
     assert len(JOBS_DEF) == 6
+    assert len(CANONICAL_STAGES) == 5
+    assert set(CANONICAL_STAGES) == {"extract", "load", "validate", "transform", "publish"}
+
     job_ids = [j["id"] for j in JOBS_DEF]
     assert "load_orders" in job_ids
     assert "load_lineitem" in job_ids
@@ -33,7 +36,8 @@ def test_jobs_definitions():
 
     for job in JOBS_DEF:
         assert job["runtime_sec"] > 0
-        assert len(job["stages"]) >= 3
+        stages = job.get("stages", CANONICAL_STAGES)
+        assert len(stages) == 5
 
 
 def test_lineage_edges():

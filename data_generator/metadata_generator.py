@@ -2,12 +2,11 @@
 OpsLens Metadata Generator
 Generates realistic simulated metadata tables:
 - PIPELINE_JOBS
-- PIPELINE_RUN_LOG (60 days of simulated nightly runs with stages & realistic variance)
+- PIPELINE_RUN_LOG (60 days of simulated nightly runs with 5 stages per job: extract, load, validate, transform, publish)
 - LINEAGE_EDGES (by hand: Sources -> Jobs -> Tables -> Marts -> Dashboards)
-- CHECK_RESULTS
-- ALERTS
-- TRUST_SCORES
-- BASELINES
+
+NOTE: CHECK_RESULTS, ALERTS, and TRUST_SCORES are NOT populated here.
+Per detection integrity rules, they are populated ONLY by the Sentinel and Trust engine.
 All labeled as IS_SIMULATED = TRUE.
 """
 
@@ -20,6 +19,9 @@ from backend.db import get_connection
 RANDOM_SEED = 42
 random.seed(RANDOM_SEED)
 
+# All jobs now have the 5 canonical stages
+CANONICAL_STAGES = ["extract", "load", "validate", "transform", "publish"]
+
 JOBS_DEF = [
     {
         "id": "load_orders",
@@ -29,7 +31,6 @@ JOBS_DEF = [
         "source": "TPCH.ORDERS Feed",
         "target": "OPSLENS.ORDERS",
         "description": "Nightly batch extract and load of e-commerce customer orders",
-        "stages": ["extract", "load", "validate"],
         "base_rows": 500,
     },
     {
@@ -40,7 +41,6 @@ JOBS_DEF = [
         "source": "TPCH.LINEITEM Feed",
         "target": "OPSLENS.LINEITEM",
         "description": "High-volume line item transaction ingest with tax & price validation",
-        "stages": ["extract", "load", "validate"],
         "base_rows": 2000,
     },
     {
@@ -51,7 +51,6 @@ JOBS_DEF = [
         "source": "Energy Meter IoT Stream",
         "target": "OPSLENS.ENERGY_READINGS",
         "description": "Aggregated hourly kWh telemetry from 50 municipal power meters",
-        "stages": ["extract", "load", "validate"],
         "base_rows": 1200,
     },
     {
@@ -62,7 +61,6 @@ JOBS_DEF = [
         "source": "National Weather API",
         "target": "OPSLENS.WEATHER_DAILY",
         "description": "Daily temperature, precipitation, and wind speeds across cities",
-        "stages": ["extract", "load", "validate"],
         "base_rows": 10,
     },
     {
@@ -73,7 +71,6 @@ JOBS_DEF = [
         "source": "OPSLENS Raw Tables",
         "target": "OPSLENS.REVENUE_MART",
         "description": "Transform and join orders, lineitems, energy and weather into analytical marts",
-        "stages": ["extract", "transform", "validate"],
         "base_rows": 2500,
     },
     {
@@ -84,7 +81,6 @@ JOBS_DEF = [
         "source": "OPSLENS Marts",
         "target": "OPSLENS.DASHBOARD_METRICS",
         "description": "Push pre-aggregated KPI metrics to executive, grid, and ops dashboards",
-        "stages": ["extract", "validate", "publish"],
         "base_rows": 300,
     },
 ]
@@ -175,9 +171,9 @@ def populate_lineage_edges(conn):
 def generate_pipeline_run_log(conn, days: int = 60):
     """
     Generates 60 days of simulated nightly pipeline execution logs.
-    Includes realistic Gaussian noise, sequential stages, and historical blips.
+    Includes all 5 stages (extract, load, validate, transform, publish) per job per day.
     """
-    print(f"  -> Generating {days} days of PIPELINE_RUN_LOG...")
+    print(f"  -> Generating {days} days of PIPELINE_RUN_LOG (all 5 canonical stages)...")
     conn.execute("TRUNCATE TABLE OPSLENS.PIPELINE_RUN_LOG")
 
     now = datetime.now()
@@ -192,8 +188,8 @@ def generate_pipeline_run_log(conn, days: int = 60):
         for job in JOBS_DEF:
             job_id = job["id"]
             expected_total_sec = job["runtime_sec"]
-            stages = job["stages"]
-            stage_expected_sec = expected_total_sec / len(stages)
+            # 5 canonical stages
+            stage_expected_sec = expected_total_sec / 5.0
             base_rows = job["base_rows"]
 
             # Historical blips / anomalies
@@ -213,8 +209,8 @@ def generate_pipeline_run_log(conn, days: int = 60):
                 is_anomaly_blip = True
                 blip_type = "validation_warning"
 
-            # Execute stages sequentially
-            for stage_idx, stage in enumerate(stages):
+            # Execute all 5 stages sequentially: extract, load, validate, transform, publish
+            for stage_idx, stage in enumerate(CANONICAL_STAGES):
                 run_id = f"run_{run_date.strftime('%Y%m%d')}_{job_id}_{stage}"
                 
                 # Duration variance (Gaussian ± 12%)
@@ -224,10 +220,11 @@ def generate_pipeline_run_log(conn, days: int = 60):
 
                 start_ts = current_time
                 end_ts = start_ts + timedelta(seconds=stage_dur)
-                current_time = end_ts + timedelta(seconds=random.randint(2, 6))
+                current_time = end_ts + timedelta(seconds=random.randint(1, 4))
 
                 # Row count variance (Gaussian ± 5%)
                 row_var = int(random.gauss(base_rows, base_rows * 0.05))
+                # Rows reported on load / transform / publish
                 rows_loaded = max(0, row_var) if stage in ("load", "transform", "publish") else 0
 
                 status = "SUCCESS"
@@ -278,142 +275,11 @@ def generate_pipeline_run_log(conn, days: int = 60):
 
     df = pd.DataFrame(all_runs)
     conn.import_from_pandas(df, ("OPSLENS", "PIPELINE_RUN_LOG"))
-    print(f"     [OK] Inserted {len(all_runs):,} pipeline stage run logs across {days} days")
-
-
-def generate_check_results_and_alerts(conn):
-    """Generates baseline check results and recent observability alerts."""
-    print("  -> Generating CHECK_RESULTS and ALERTS...")
-    conn.execute("TRUNCATE TABLE OPSLENS.CHECK_RESULTS")
-    conn.execute("TRUNCATE TABLE OPSLENS.ALERTS")
-
-    now = datetime.now()
-
-    # 1. Check Results
-    checks = [
-        ("chk_freshness_orders", "Orders Ingestion Freshness", "OPSLENS.ORDERS", "FRESHNESS", "CRITICAL", "PASSED", "< 24 hours", "2.4 hours", "Orders table freshness is well within SLA"),
-        ("chk_null_orders_key", "Orders Primary Key Null Check", "OPSLENS.ORDERS", "NULL_CHECK", "CRITICAL", "PASSED", "0 nulls", "0 nulls", "Primary key O_ORDERKEY contains no nulls"),
-        ("chk_row_count_lineitem", "Lineitem Daily Row Count", "OPSLENS.LINEITEM", "ROW_COUNT", "WARNING", "PASSED", "120,000 +/- 5%", "120,515", "Lineitem row volume is within expected range"),
-        ("chk_recon_revenue", "Orders vs Lineitem Total Price Reconciliation", "OPSLENS.ORDERS", "RECONCILIATION", "CRITICAL", "PASSED", "Delta < $10.00", "$0.00", "Order total prices perfectly match summed line items"),
-        ("chk_freshness_energy", "Energy Telemetry Freshness", "OPSLENS.ENERGY_READINGS", "FRESHNESS", "WARNING", "PASSED", "< 6 hours", "1.1 hours", "Smart meter stream is actively advancing"),
-        ("chk_negative_kwh", "Energy Consumption Range Check", "OPSLENS.ENERGY_READINGS", "VALUE_RANGE", "CRITICAL", "PASSED", "KWH >= 0", "Min KWH = 0.012", "No negative power consumption detected"),
-        ("chk_weather_coverage", "Weather City Coverage Check", "OPSLENS.WEATHER_DAILY", "COMPLETENESS", "INFO", "PASSED", "10 cities active", "10 cities active", "All municipal weather stations reported"),
-        ("chk_schema_orders", "Orders Schema Invariants", "OPSLENS.ORDERS", "SCHEMA_CHECK", "CRITICAL", "PASSED", "9 standard columns", "9 standard columns", "Schema structure matches production spec"),
-    ]
-
-    check_rows = []
-    for c in checks:
-        check_rows.append({
-            "CHECK_ID": f"chk_{uuid.uuid4().hex[:10]}",
-            "CHECK_NAME": c[0],
-            "TABLE_NAME": c[1],
-            "CHECK_TYPE": c[2],
-            "SEVERITY": c[3],
-            "STATUS": c[4],
-            "EXPECTED_VALUE": c[5],
-            "ACTUAL_VALUE": c[6],
-            "MESSAGE": c[7],
-            "EXECUTED_AT": now - timedelta(minutes=random.randint(10, 180)),
-            "IS_SIMULATED": True,
-        })
-    df_checks = pd.DataFrame(check_rows)
-    conn.import_from_pandas(df_checks, ("OPSLENS", "CHECK_RESULTS"))
-
-    # 2. Historical Alerts
-    alerts = [
-        ("LATE_LOAD", "MEDIUM", "OPSLENS.LINEITEM", "Late Lineitem batch ingestion", "Stage load_lineitem started 42 minutes behind schedule due to upstream source lock", "RESOLVED", now - timedelta(days=14), now - timedelta(days=14, hours=-1)),
-        ("DATA_DRIFT", "LOW", "OPSLENS.ENERGY_READINGS", "Unusual weekend load surge", "Average household consumption deviated +22% from historical Sunday baseline", "RESOLVED", now - timedelta(days=7), now - timedelta(days=6)),
-        ("PIPELINE_BLIP", "HIGH", "OPSLENS.REVENUE_MART", "Mart build duration spike", "build_revenue_mart exceeded p95 threshold by 310 seconds; verified clean completion", "RESOLVED", now - timedelta(days=28), now - timedelta(days=28, hours=-2)),
-    ]
-
-    alert_rows = []
-    for a in alerts:
-        alert_rows.append({
-            "ALERT_ID": f"alt_{uuid.uuid4().hex[:10]}",
-            "INCIDENT_TYPE": a[0],
-            "SEVERITY": a[1],
-            "TARGET_OBJECT": a[2],
-            "SUMMARY": a[3],
-            "DETAILS": a[4],
-            "STATUS": a[5],
-            "TRIGGERED_AT": a[6],
-            "RESOLVED_AT": a[7],
-            "IS_SIMULATED": True,
-        })
-    df_alerts = pd.DataFrame(alert_rows)
-    conn.import_from_pandas(df_alerts, ("OPSLENS", "ALERTS"))
-    print(f"     [OK] Inserted {len(check_rows)} check results and {len(alert_rows)} alerts")
-
-
-def generate_trust_scores_and_baselines(conn):
-    """Generates table trust scores and statistical baselines for anomaly detection."""
-    print("  -> Generating TRUST_SCORES and BASELINES...")
-    conn.execute("TRUNCATE TABLE OPSLENS.TRUST_SCORES")
-    conn.execute("TRUNCATE TABLE OPSLENS.BASELINES")
-
-    now = datetime.now()
-
-    # 1. Trust Scores
-    trust_items = [
-        ("OPSLENS.ORDERS", "TABLE", 98.8, 99.0, 99.5, 98.0, "HEALTHY"),
-        ("OPSLENS.LINEITEM", "TABLE", 97.5, 98.0, 99.0, 96.0, "HEALTHY"),
-        ("OPSLENS.CUSTOMER", "TABLE", 99.9, 100.0, 100.0, 99.8, "HEALTHY"),
-        ("OPSLENS.ENERGY_READINGS", "TABLE", 96.2, 95.0, 98.5, 95.5, "HEALTHY"),
-        ("OPSLENS.ENERGY_METERS", "TABLE", 100.0, 100.0, 100.0, 100.0, "HEALTHY"),
-        ("OPSLENS.WEATHER_DAILY", "TABLE", 99.1, 99.0, 99.5, 99.0, "HEALTHY"),
-        ("OPSLENS.REVENUE_MART", "DATA_PRODUCT", 98.0, 97.5, 99.0, 97.5, "HEALTHY"),
-        ("OPSLENS.GRID_OPS_MART", "DATA_PRODUCT", 96.5, 96.0, 97.0, 96.5, "HEALTHY"),
-    ]
-
-    trust_rows = []
-    for t in trust_items:
-        trust_rows.append({
-            "SCORE_ID": f"score_{uuid.uuid4().hex[:10]}",
-            "OBJECT_NAME": t[0],
-            "OBJECT_TYPE": t[1],
-            "TRUST_SCORE": t[2],
-            "FRESHNESS_SCORE": t[3],
-            "QUALITY_SCORE": t[4],
-            "RELIABILITY_SCORE": t[5],
-            "STATUS": t[6],
-            "RECORDED_AT": now,
-            "IS_SIMULATED": True,
-        })
-    df_trust = pd.DataFrame(trust_rows)
-    conn.import_from_pandas(df_trust, ("OPSLENS", "TRUST_SCORES"))
-
-    # 2. Baselines
-    baselines = [
-        ("OPSLENS.ORDERS", "DAILY_ROW_COUNT", 30000.0, 450.0, 28000.0, 32000.0, 30),
-        ("OPSLENS.ORDERS", "DAILY_TOTAL_REVENUE", 45281432.0, 1200000.0, 40000000.0, 50000000.0, 30),
-        ("OPSLENS.LINEITEM", "DAILY_ROW_COUNT", 120515.0, 1500.0, 115000.0, 125000.0, 30),
-        ("OPSLENS.ENERGY_READINGS", "HOURLY_ROW_COUNT", 108000.0, 500.0, 100000.0, 112000.0, 30),
-        ("OPSLENS.ENERGY_READINGS", "AVG_KWH_PER_READING", 1.24, 0.15, 0.70, 2.10, 30),
-        ("OPSLENS.WEATHER_DAILY", "RECORDED_DAYS_COUNT", 10960.0, 50.0, 10500.0, 11200.0, 30),
-        ("OPSLENS.REVENUE_MART", "BUILD_DURATION_SEC", 302.0, 28.0, 220.0, 420.0, 30),
-    ]
-
-    baseline_rows = []
-    for b in baselines:
-        baseline_rows.append({
-            "BASELINE_ID": f"base_{uuid.uuid4().hex[:10]}",
-            "OBJECT_NAME": b[0],
-            "METRIC_NAME": b[1],
-            "BASELINE_MEAN": b[2],
-            "BASELINE_STDDEV": b[3],
-            "MIN_THRESHOLD": b[4],
-            "MAX_THRESHOLD": b[5],
-            "WINDOW_DAYS": b[6],
-            "UPDATED_AT": now,
-            "IS_SIMULATED": True,
-        })
-    df_base = pd.DataFrame(baseline_rows)
-    conn.import_from_pandas(df_base, ("OPSLENS", "BASELINES"))
-    print(f"     [OK] Inserted {len(trust_rows)} trust scores and {len(baseline_rows)} metric baselines")
+    print(f"     [OK] Inserted {len(all_runs):,} pipeline stage run logs (6 jobs x 5 stages x {days} days)")
 
 
 def generate_all_metadata(days: int = 60):
-    """Executes population of all metadata and lineage tables."""
+    """Executes population of metadata and lineage tables."""
     print("=" * 60)
     print(" OpsLens — Metadata & Lineage Generation")
     print("=" * 60)
@@ -422,8 +288,6 @@ def generate_all_metadata(days: int = 60):
         populate_pipeline_jobs(conn)
         populate_lineage_edges(conn)
         generate_pipeline_run_log(conn, days=days)
-        generate_check_results_and_alerts(conn)
-        generate_trust_scores_and_baselines(conn)
         print(">> Metadata generation completed successfully!")
     finally:
         conn.close()
